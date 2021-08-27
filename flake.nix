@@ -70,15 +70,48 @@
 
 
       # A NixOS module, if applicable (e.g. if the package provides a system service).
-      # nixosModules.hello =
-      #   { pkgs, ... }:
-      #   {
-      #     nixpkgs.overlays = [ self.overlay ];
+      nixosModules.ipfs-search =
+        { pkgs, config, lib, ... }:
+          with lib;
+          {
+            config.nixpkgs.overlays = [ self.overlay ];
+            # needed to run elastic search
+            config.nixpkgs.config.allowUnfree = true;
 
-      #     environment.systemPackages = [ pkgs.hello ];
+            config.environment.systemPackages = with pkgs;[ ipfs-search-backend dweb-search-frontend ];
 
-      #     #systemd.services = { ... };
-      #   };
+            options.services.ipfs-search = {
+              enable = mkOption {
+                type = types.bool;
+                default = false;
+                description = ''
+                  Whether to enable the ipfs-search service. It uses Rabbitmq, elastic-search, ipfs
+                '';
+              };
+
+              enableRabbitmqManagement = mkOption {
+                type = types.bool;
+                default = true;
+                description = ''
+                  Wether to enable rabbitmq management plugin
+                '';
+              };
+            };
+            config.services.rabbitmq = mkIf config.services.ipfs-search.enable {
+              enable = true;
+              configItems = mkIf config.services.ipfs-search.enableRabbitmqManagement {
+                "management.tcp.port" = "15672";
+                "management.tcp.ip" = config.services.rabbitmq.listenAddress;
+              };
+              plugins = lib.optionals config.services.ipfs-search.enableRabbitmqManagement [ "rabbitmq_management" ];
+            };
+            config.services.elasticsearch.enable = config.services.ipfs-search.enable;
+            config.services.ipfs.enable = config.services.ipfs-search.enable;
+            # https://github.com/lucas-clemente/quic-go/wiki/UDP-Receive-Buffer-Size 
+            # 2021/08/27 02:08:25 failed to sufficiently increase receive buffer size (was: 208 kiB, wanted: 2048 got: 416 kiB). See https://github.com/lucas-clemente/quic-go/wiki/UDP-Receive-Buffer-Size for details
+            config.boot.kernel.sysctl."net.core.rmem_max" = mkDefault 2500000;
+            #systemd.services = { ... };
+          };
 
       # Tests run by 'nix flake check' and by Hydra.
       # checks = forAllSystems (system: {
